@@ -1,14 +1,18 @@
 import { useEffect, useState } from "react";
-import { getAllBookings, updateBookingStatus } from "../api";
+import { supabase } from "../supabase";
 
 export default function Admin() {
   const [bookings, setBookings] = useState<any[]>([]);
   const [msg, setMsg] = useState("");
 
   async function load() {
-    const res = await getAllBookings();
-    if (res.error) return setMsg(res.error);
-    setBookings(res.data || []);
+    const { data, error } = await supabase
+      .from("bookings")
+      .select("*, resources(name, type), profiles(full_name)")
+      .order("created_at", { ascending: false });
+
+    if (error) return setMsg(error.message);
+    setBookings(data || []);
   }
 
   useEffect(() => {
@@ -17,8 +21,12 @@ export default function Admin() {
 
   async function handleAction(id: string, status: "approved" | "rejected") {
     setMsg(`Updating booking...`);
-    const res = await updateBookingStatus(id, status);
-    if (res.error) setMsg(res.error);
+    const { error } = await supabase
+      .from("bookings")
+      .update({ status })
+      .eq("id", id);
+
+    if (error) setMsg(error.message);
     else {
       setMsg(`Booking ${status}.`);
       load();
@@ -43,7 +51,7 @@ export default function Admin() {
               background: b.status === "pending" ? "#fffbe6" : "#f6ffed",
             }}
           >
-            <strong>{b.resources?.name}</strong> — {b.status}
+            <strong>{b.resources?.name || "Resource"}</strong> — {b.status}
             <br />
             Member: {b.profiles?.full_name || b.member_id?.slice(0, 8)}
             <br />

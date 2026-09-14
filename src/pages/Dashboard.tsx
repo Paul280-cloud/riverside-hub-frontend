@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../supabase";
-import { getMyBookings, createBooking } from "../api";
 
 export default function Dashboard() {
   const [resources, setResources] = useState<any[]>([]);
@@ -13,24 +12,27 @@ export default function Dashboard() {
   const navigate = useNavigate();
 
   async function loadResources() {
-    const { data, error } = await supabase
-      .from("resources")
-      .select("*");
+    const { data, error } = await supabase.from("resources").select("*");
     if (error) setMsg(error.message);
     else setResources(data || []);
   }
 
   async function loadBookings() {
-    try {
-      const b = await getMyBookings();
-      if (b.error) {
-        setBookings([]);
-      } else {
-        setBookings(b.data || []);
-      }
-    } catch {
-      // backend not reachable from deployed site — fine for demo
+    const { data: sessionData } = await supabase.auth.getSession();
+    const userId = sessionData.session?.user.id;
+    if (!userId) return setBookings([]);
+
+    const { data, error } = await supabase
+      .from("bookings")
+      .select("*, resources(name, type)")
+      .eq("member_id", userId)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.warn("Bookings fetch error:", error.message);
       setBookings([]);
+    } else {
+      setBookings(data || []);
     }
   }
 
@@ -48,50 +50,35 @@ export default function Dashboard() {
     e.preventDefault();
     setMsg("Creating booking...");
 
-    // If API is unreachable (deployed), insert directly via Supabase.
-    let res: any;
-    try {
-      res = await createBooking({
-        resource_id: resourceId,
-        start_time: startTime,
-        end_time: endTime,
-      });
-    } catch {
-      res = { error: "API unreachable" };
-    }
+    const { data: sessionData } = await supabase.auth.getSession();
+    const userId = sessionData.session?.user.id;
+    if (!userId) return setMsg("You need to log in first.");
 
-    if (res?.error) {
-      // Fallback: insert directly via Supabase using logged-in session
-      const { data: sessionData } = await supabase.auth.getSession();
-      const userId = sessionData.session?.user.id;
-      if (!userId) {
-        setMsg("You need to log in first.");
-        return;
-      }
+    const { error } = await supabase.from("bookings").insert({
+      resource_id: resourceId,
+      member_id: userId,
+      start_time: startTime,
+      end_time: endTime,
+      status: "pending",
+    });
 
-      const { error } = await supabase.from("bookings").insert({
-        resource_id: resourceId,
-        member_id: userId,
-        start_time: startTime,
-        end_time: endTime,
-        status: "pending",
-      });
-
-      if (error) setMsg(error.message);
-      else {
-        setMsg("Booking created (pending approval).");
-        loadBookings();
-      }
+    if (error) {
+      setMsg(error.message);
     } else {
       setMsg("Booking created (pending approval).");
-      loadBookings();
+      setResourceId("");
+      setStartTime("");
+      setEndTime("");
+      setTimeout(loadBookings, 400);
     }
   }
 
   return (
     <div style={{ padding: 24, maxWidth: 900, margin: "0 auto" }}>
       <h1>Dashboard</h1>
-      <button onClick={handleLogout} style={{ marginBottom: 16 }}>Logout</button>
+      <button onClick={handleLogout} style={{ marginBottom: 16 }}>
+        Logout
+      </button>
 
       <h2>Make a Booking</h2>
       <form onSubmit={handleBooking} style={{ marginBottom: 32 }}>
@@ -108,6 +95,7 @@ export default function Dashboard() {
             </option>
           ))}
         </select>
+
         <input
           type="datetime-local"
           value={startTime}
@@ -115,6 +103,7 @@ export default function Dashboard() {
           required
           style={{ display: "block", padding: 8, marginBottom: 8, width: "100%" }}
         />
+
         <input
           type="datetime-local"
           value={endTime}
@@ -122,8 +111,12 @@ export default function Dashboard() {
           required
           style={{ display: "block", padding: 8, marginBottom: 8, width: "100%" }}
         />
-        <button type="submit" style={{ padding: 8 }}>Request Booking</button>
+
+        <button type="submit" style={{ padding: 8 }}>
+          Request Booking
+        </button>
       </form>
+
       <p>{msg}</p>
 
       <h2>My Bookings</h2>
