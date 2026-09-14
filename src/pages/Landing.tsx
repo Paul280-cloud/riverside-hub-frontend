@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { getCampaigns, createDonation } from "../api";
+import { supabase } from "../supabase";
 
 export default function Landing() {
   const [campaigns, setCampaigns] = useState<any[]>([]);
@@ -8,27 +8,40 @@ export default function Landing() {
   const [msg, setMsg] = useState("");
 
   async function load() {
-    const res = await getCampaigns();
-    setCampaigns(res.data || []);
+    const { data, error } = await supabase
+      .from("campaigns")
+      .select("*")
+      .eq("active", true);
+    if (error) return setMsg(error.message);
+    setCampaigns(data || []);
   }
 
   useEffect(() => {
     load();
   }, []);
 
-  async function handleDonate(campaignId: string) {
+  async function handleDonate(campaignId: string, currentTotal: number) {
     if (!amount || Number(amount) <= 0) return setMsg("Enter a valid amount");
     setMsg("Processing donation...");
-    const res = await createDonation({
-      amount: Number(amount),
-      campaign_id: campaignId,
-    });
-    if (res.error) setMsg(res.error);
-    else {
-      setMsg(`Thank you! R${amount} donated.`);
-      setAmount("");
-      load();
-    }
+
+    const { error: donErr } = await supabase
+      .from("donations")
+      .insert({ amount: Number(amount), campaign: campaignId });
+
+    if (donErr) return setMsg(donErr.message);
+
+    const newTotal = Number(currentTotal || 0) + Number(amount);
+
+    const { error: updErr } = await supabase
+      .from("campaigns")
+      .update({ current_amount: newTotal })
+      .eq("id", campaignId);
+
+    if (updErr) return setMsg(updErr.message);
+
+    setMsg(`Thank you! R${amount} donated.`);
+    setAmount("");
+    load();
   }
 
   return (
@@ -93,7 +106,10 @@ export default function Landing() {
                 onChange={(e) => setAmount(e.target.value)}
                 style={{ padding: 8, marginRight: 8 }}
               />
-              <button onClick={() => handleDonate(c.id)} style={{ padding: 8 }}>
+              <button
+                onClick={() => handleDonate(c.id, c.current_amount)}
+                style={{ padding: 8 }}
+              >
                 Donate
               </button>
             </div>
