@@ -9,25 +9,51 @@ export default function Signup() {
   const [msg, setMsg] = useState("");
   const navigate = useNavigate();
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setMsg("Creating account...");
+  async function ensureProfile(userId: string, fullName: string) {
+    const { data: existing } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("id", userId)
+      .maybeSingle();
 
-    const { data, error } = await supabase.auth.signUp({ email, password });
-    if (error) return setMsg(error.message);
-
-    // Create profile row
-    if (data.user) {
+    if (!existing) {
       await supabase.from("profiles").insert({
-        id: data.user.id,
-        full_name: name,
+        id: userId,
+        full_name: fullName || "Member",
         role: "member",
         membership_tier: "free",
       });
     }
+  }
 
-    setMsg("Account created. Check your email to verify, then login.");
-    setTimeout(() => navigate("/login"), 1500);
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setMsg("Creating account...");
+
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { data: { full_name: name } },
+    });
+
+    if (error) return setMsg(error.message);
+
+    if (data.user) {
+      try {
+        await ensureProfile(data.user.id, name);
+      } catch (err) {
+        console.warn("Profile creation deferred until login");
+      }
+    }
+
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (sessionData.session) {
+      setMsg("Account created. Redirecting…");
+      setTimeout(() => navigate("/dashboard"), 800);
+    } else {
+      setMsg("Account created. Check your email to verify, then log in.");
+      setTimeout(() => navigate("/login"), 1500);
+    }
   }
 
   return (

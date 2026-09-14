@@ -8,12 +8,42 @@ export default function Login() {
   const [msg, setMsg] = useState("");
   const navigate = useNavigate();
 
+  async function ensureProfile(userId: string, fullName: string) {
+    const { data: existing } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (!existing) {
+      await supabase.from("profiles").insert({
+        id: userId,
+        full_name: fullName || "Member",
+        role: "member",
+        membership_tier: "free",
+      });
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setMsg("Logging in...");
 
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) return setMsg(error.message);
+
+    const { data: sessionData } = await supabase.auth.getSession();
+    const user = sessionData.session?.user;
+    if (user) {
+      try {
+        await ensureProfile(
+          user.id,
+          (user.user_metadata?.full_name as string) || "Member"
+        );
+      } catch (err) {
+        console.warn("Profile check failed:", err);
+      }
+    }
 
     navigate("/dashboard");
   }
